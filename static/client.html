@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<head>
+	<title>
+		Pong Client
+	</title>
+	<script src="/socket.io/socket.io.js"></script>
+	<script src="pong-game.js"></script>
+	<script src="client.js"></script>
+	<script src="//cdn.sencha.io/ext-4.1.1-gpl/ext-all-dev.js"></script>
+	<script>
+		Ext.DomHelper.useDom = true;
+		var playerName = "default";
+		var score=0;
+		var opScore=0;
+		var rally=0;
+		var bestRally=0;
+		var socket=io.connect();
+		var joined = false;
+		socket.on("clientStart", function(content){
+			var initAngle=-60+120*Math.random();
+			var initDirection = Math.random() < 0.5 ? -1 : 1;
+			document.getElementById("gameContainer").style.display = "block";
+			pong.init();
+			pong.resetBall();
+			pong.launch(initAngle,initDirection);
+			score=0;
+			opScore=0;
+			pong.setScore({left:score,right:opScore});
+			socket.emit("launch", {
+				angle: initAngle,
+				direction: initDirection
+			});
+		});
+		socket.on("generateStart", function(content){
+			document.getElementById("gameContainer").style.display = "block";
+			pong.init();
+			pong.resetBall();
+			pong.launch(content.angle,-content.direction);
+		});
+		socket.on("launchNoInit", function(content){
+			pong.resetBall();
+			pong.launch(content.angle,-content.direction);
+		});
+		socket.on("passRequest", function(content){
+			if(confirm(content + " wants to play a game with you!")){
+				game = content;
+				socket.emit("startGame", game);
+			}else{
+				//USER DECLINES
+			}
+		});
+		socket.on("reflect", function(content){
+			pong.resetBall(960,content.position);
+			pong.launch(content.angle, -1);
+			rally++;
+			if(rally>=bestRally){
+				bestRally=rally;
+				document.getElementById("bestRallyContainer").textContent= "Best Rally: " +bestRally;
+			}
+			document.getElementById("rallyContainer").textContent = "Current Rally: " + rally;
+		});
+		socket.on("raiseScore", function(content){
+			rally=0;
+			document.getElementById("rallyContainer").textContent = "Current Rally: " + rally;
+			score++;
+			console.log(score + " " + opScore);
+			pong.setScore({left:score,right:opScore});
+			if(score>=10){
+				pong.resetBall();
+				alert("VICTORY");
+				socket.emit("end",playerName);
+				score=0;
+				opScore=0;
+			}
+		});
+		socket.on("pmove", function(content){
+			pong.updateOpponentPaddle(content.position);
+		});
+		socket.on("newPerson", function(content){
+			//Ext.fly("users").createChild({
+			//	tag : "li",
+			//	children: [content]
+			//});
+			//$('#users').empty();
+			if(joined){
+				var users = "";
+				var i = 0;
+				for(var name in content){
+					if(content[i] != playerName){	
+						users += '<button id="'+ content[i]+'"> Play! </button>'+ content[i] + "</br>\n";
+						//$('#users').append("<li id=" + content[i] + ">" +content[i]+ "</li>");
+					} 
+					i++;
+				}
+				document.getElementById("users").innerHTML = users;
+				var j = 0;
+				for(var name in content){
+					if(content[j] != playerName){
+						console.log(content[j]);
+						document.getElementById(content[j]).addEventListener("click", function(){
+							var clickedName=this.id;
+							var match=clickedName;
+							socket.emit("requestGame", match);
+						}, false);
+					}
+					j++;
+				}
+			}
+		});
+		Ext.onReady(function(){
+			Ext.fly("join").on("click", function(){
+				playerName=Ext.fly("name").getValue();
+				if(playerName!=null && playerName!="" && playerName!=" "){
+					socket.emit("newConnect", Ext.fly("name").getValue());
+					socket.emit("sendID", Ext.fly("name").getValue());
+					document.getElementById("joined").innerHTML = "";
+					joined = true;
+				}
+			});
+		});
+		window.addEventListener("paddlehit-left", function(e){
+			if (e.detail.hit) {
+				rally++;
+				if(rally>=bestRally){
+					bestRally=rally;
+					document.getElementById("bestRallyContainer").textContent = "Best Rally: " + bestRally;
+				}
+				document.getElementById("rallyContainer").textContent = "Current Rally: " + rally;
+				console.log("HIT PADDLE.  New angle: %f", e.detail.angle);
+				socket.emit("reflect", {
+					angle: e.detail.angle,
+					position: e.detail.position
+				});
+			}else{
+				rally=0;
+				document.getElementById("rallyContainer").textContent = "Current Rally: " + rally;
+				console.log("MISSED PADDLE");
+				opScore++;
+				pong.setScore({left:score,right:opScore});
+				socket.emit("raiseOpScore", {player:playerName});
+				var initAngle = -60+120*Math.random();
+				var initDirection = Math.random() < 0.5 ? -1 : 1;
+				pong.resetBall();
+				if(opScore>=10){
+					alert("DEFEAT");
+					socket.emit("end",playerName);
+					score=0;
+					opScore=0;
+				}else{
+					pong.launch(initAngle, initDirection);
+					socket.emit("launchNoInit", {
+						angle: initAngle,
+						direction: initDirection
+					});
+				}
+			}
+		});
+		window.addEventListener("paddlemove",function(e){
+			socket.emit("pmove", {
+				position: e.detail.position
+			});
+		});	
+	</script>
+	<style type="text/css">
+		body{
+			width: 760px; /* how wide to make your web page */
+			background-color: teal; /* what color to make the background */
+			margin: 0 auto;
+			padding: 0;
+			font:12px/16px Verdana, sans-serif; /* default font */
+		}
+		div#main{
+			background-color: #FFF;
+			margin: 0;
+			padding: 10px;
+			width: 1000px;
+		}
+		#gameContainer{
+			margin: 0 auto;
+			width: 960px;
+			height: 500px;
+		}
+		#controls{
+			height: 20px;
+			text-align: center;
+		}
+		#game{
+			width: 960px;
+			height: 480px;
+			border: 1px solid black;
+		}
+	</style>
+</head>
+<body>
+	<div id="users">
+	</div>
+	<textarea id="name"></textarea>
+	<div id="joined">
+	<button id="join">Join!</button>
+	</div>
+	<div id="main">
+		<script src="pong-game.js"></script>
+		<script src="client.js"></script>
+		<div id="gameContainer" style="display:none;">
+			<div id="game"></div>
+		</div>
+		<div id="bestRallyContainer">
+		</div>
+		<div id="rallyContainer">
+		</div>
+	</div>
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+</body>
+</html>
+
